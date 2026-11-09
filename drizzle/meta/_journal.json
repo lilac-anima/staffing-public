@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794040688597,
+      "tag": "0000_greedy_james_howlett",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794158641602,
+      "tag": "0007_worker_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794204026433,
+      "tag": "0008_mixed_komodo",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794235505987,
+      "tag": "0009_acceptance_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794237127983,
+      "tag": "0010_work_log_quality",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794237630777,
+      "tag": "0011_deployment_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794237807108,
+      "tag": "0012_nice_randall",
+      "breakpoints": true
+    }
+  ]
+}

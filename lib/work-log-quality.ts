@@ -1,0 +1,22 @@
+import {z} from 'zod';
+const text=z.string().trim().min(1).max(2000), id=z.string().trim().min(1).max(120);
+export const dimensions=['relevance','factualSupport','actionability','signalNovelty','traceabilityTiming'] as const;
+const dimension=z.object({score:z.union([z.number().int().min(0).max(3),z.literal('unknown'),z.literal('na')]),reason:text,entryIds:z.array(z.number().int().positive()).max(100),evidence:z.array(text).max(50)}).strict().superRefine((d,c)=>{if(typeof d.score==='number'&&!d.evidence.length)c.addIssue({code:'custom',message:'A scored dimension requires an evidence reference.'})});
+export const planInput=z.object({kind:z.literal('plan'),taskId:id,brief:text,family:text,difficulty:text,reason:text,slots:z.array(z.object({id,purpose:text,applicability:z.enum(['applicable','conditional','na','unknown']),timing:text,evidenceStandard:text}).strict()).min(1).max(50)}).strict().superRefine((p,c)=>{if(new Set(p.slots.map(s=>s.id)).size!==p.slots.length)c.addIssue({code:'custom',message:'Slot IDs must be unique.'})});
+export const packetInput=z.object({kind:z.literal('packet'),taskId:id,planId:id}).strict();
+export const assessmentInput=z.object({kind:z.literal('assessment'),taskId:id,packetId:id,reviewerLabel:text,confidence:text,audit:text,gate:z.enum(['clear','hold','failed','unknown']),gateReason:text,dimensions:z.object({relevance:dimension,factualSupport:dimension,actionability:dimension,signalNovelty:dimension,traceabilityTiming:dimension}).strict(),units:z.array(z.object({slotId:id,fact:text,entryIds:z.array(z.number().int().positive()).min(1).max(100),evidence:z.array(text).min(1).max(50),reason:text}).strict()).max(50)}).strict().superRefine((a,c)=>{if(new Set(a.units.map(u=>u.slotId)).size!==a.units.length)c.addIssue({code:'custom',message:'Only one unit per slot is allowed.'});const facts=a.units.map(u=>u.fact.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu,' ').trim()).filter(Boolean);if(new Set(facts).size!==facts.length)c.addIssue({code:'custom',message:'Duplicate facts cannot earn multiple credits.'});});
+export const adjudicationInput=z.object({kind:z.literal('adjudication'),taskId:id,packetId:id,assessmentIds:z.array(id).length(2),agreement:text,disagreements:text,reason:text,confidence:text,gate:z.enum(['clear','hold','failed','unknown'])}).strict().superRefine((a,c)=>{if(a.assessmentIds[0]===a.assessmentIds[1])c.addIssue({code:'custom',message:'Two distinct assessments are required.'})});
+export const approvalInput=z.object({kind:z.literal('approve-plan'),taskId:id,planId:id,reason:text}).strict();
+export const attestationInput=z.object({kind:z.literal('attest'),taskId:id,packetId:id,approvalId:id,assessmentIds:z.array(id).length(2),selectedAssessmentId:id,gate:z.enum(['clear','hold','failed','unknown']),reason:text,identityEvidence:text,independenceEvidence:text,sourceProvenance:text,confidence:text,factualAudit:text,semanticDedup:text,disagreements:text}).strict().superRefine((a,c)=>{if(a.assessmentIds[0]===a.assessmentIds[1]||!a.assessmentIds.includes(a.selectedAssessmentId))c.addIssue({code:'custom',message:'Choose two distinct assessments and one adjudicated assessment.'})});
+export const input=z.union([planInput,packetInput,assessmentInput,adjudicationInput,approvalInput,attestationInput]);
+/** A numerical candidate is never authoritative without external authenticated PM attestation. */
+export function candidate(quality:number,coverage:number){return 0.7*quality+0.3*coverage}
+export const authorityNotice='Owner-private access does not authenticate reviewers. Drafts are unverified; dispatcher attestation is required for verified outcomes.';
+
+export function draftSummary(plan:any,assessment:any){
+ const slots=plan?.slots || [];const applicable=slots.filter((s:any)=>s.applicability==='applicable');const ambiguous=slots.some((s:any)=>s.applicability==='conditional'||s.applicability==='unknown');
+ const units=assessment?.units || [];const covered=new Set(units.map((u:any)=>u.slotId));const u=applicable.filter((s:any)=>covered.has(s.id)).length;const n=applicable.length;
+ const ds=dimensions.map(k=>assessment?.dimensions?.[k]);const unknown=ds.some(d=>!d || d.score==='unknown');const scored=ds.filter(d=>typeof d?.score==='number');
+ const quality=unknown || !scored.length ? null : 100*scored.reduce((v,d)=>v+d.score,0)/(3*scored.length);
+ return {u,n,coverage:ambiguous||!n?null:100*u/n,quality,combined:null,eligible:false};
+}

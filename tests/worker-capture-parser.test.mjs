@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createUsageParser} from '../scripts/worker-capture-parser.mjs';
+const usage={input_tokens:10,output_tokens:4,cached_input_tokens:2};
+const run=(events,exit=0,stream=true)=>{const p=createUsageParser();for(const e of events) e==='malformed'?p.malformed():p.event(e);return p.result(exit,stream);};
+const thread={type:'thread.started',thread_id:'one'}, start={type:'turn.started'}, done={type:'turn.completed',usage};
+test('two equal token turns are distinct and optional reasoning remains unknown',()=>{const r=run([thread,start,done,start,done]);assert.equal(r.complete,true);assert.equal(r.inputTokens,20);assert.equal(r.outputTokens,8);assert.equal(r.cachedInputTokens,4);assert.equal(r.reasoningOutputTokens,null);});
+test('errors, incomplete or malformed streams, multiple threads and duplicate terminal events are unknown',()=>{for(const events of [[thread,start,{type:'turn.failed'}],[thread,start,'malformed',done],[thread,start,done,thread],[thread,start,done,done],[thread,start]])assert.equal(run(events).complete,false);assert.equal(run([thread,start,done],0,false).complete,false);assert.equal(run([thread,start,done],1).complete,false);});
+test('missing cached stays unknown and impossible subsets fail closed',()=>{assert.equal(run([thread,start,{type:'turn.completed',usage:{input_tokens:2,output_tokens:1}}]).cachedInputTokens,null);assert.equal(run([thread,start,{type:'turn.completed',usage:{input_tokens:2,output_tokens:1,cached_input_tokens:3}}]).complete,false);});
+
+test('delegation or child-agent events make totals unverified',()=>{for(const event of [{type:'item.started',item:{type:'collab_agent_tool_call'}},{type:'item.completed',item:{type:'mcp_tool_call',tool:'spawn_agent'}},{type:'agent.spawned'},{type:'item.started',item:{type:'unknown_future_type'}},{type:'new.event'},{type:'item.started',item:{type:'mcp_tool_call',tool:'followup_task'}},{type:'item.started',item:{type:'mcp_tool_call',newThreadId:'child'}},{type:'item.started',item:{type:'command_execution',command:'codex exec -'}}])assert.equal(run([thread,start,event,done]).complete,false);});
+
+test('live partial reports completed turns only and fails closed after malformed data',()=>{const p=createUsageParser();p.event(thread);p.event(start);assert.equal(p.partial().inputTokens,null);p.event(done);p.event(start);assert.equal(p.partial().inputTokens,10);p.malformed();assert.equal(p.partial().inputTokens,10);assert.deepEqual(p.result(1),{complete:false,inputTokens:10,outputTokens:4,cachedInputTokens:2,reasoningOutputTokens:null});});
+
+test('searching for codex remains valid; executing nested codex is incomplete',()=>{const search={type:'item.started',item:{type:'command_execution',command:'rg -n codex scripts'}};const nested={type:'item.started',item:{type:'command_execution',command:'printf ok && codex exec -'}};assert.equal(run([thread,start,search,done]).complete,true);assert.equal(run([thread,start,nested,done]).complete,false);});

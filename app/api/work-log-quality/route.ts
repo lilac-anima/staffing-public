@@ -1,0 +1,44 @@
+import {and,asc,desc,eq,sql} from 'drizzle-orm';
+import {env} from 'cloudflare:workers';
+import {hashCapability} from '../../../lib/deployment-settings';
+import {getDb} from '../../../db';
+import {tasks,taskWorkLog,workLogQuality} from '../../../db/schema';
+import {input,authorityNotice,draftSummary} from '../../../lib/work-log-quality';
+const headers={'Cache-Control':'no-store'};
+const unpack=(r:typeof workLogQuality.$inferSelect)=>({...r,data:JSON.parse(r.data)});
+export async function GET(req:Request){try{const taskId=new URL(req.url).searchParams.get('taskId');if(!taskId)return Response.json({error:'Task ID required.'},{status:400,headers});const rows=await getDb().select().from(workLogQuality).where(eq(workLogQuality.taskId,taskId)).orderBy(sql`rowid`).limit(501);if(rows.length>500)return Response.json({error:'Too many quality records; no partial history is shown.'},{status:503,headers});const [latest]=await getDb().select({id:taskWorkLog.id}).from(taskWorkLog).where(eq(taskWorkLog.taskId,taskId)).orderBy(desc(taskWorkLog.id)).limit(1);return Response.json({records:rows.map(unpack),latestLogId:latest?.id??0,authorityNotice},{headers})}catch{return Response.json({error:'Could not load quality records; apply migration 0010.'},{status:500,headers})}}
+export async function POST(req:Request){const parsed=input.safeParse(await req.json().catch(()=>null));if(!parsed.success)return Response.json({error:'Invalid draft.',details:parsed.error.issues.map(x=>x.message)},{status:400,headers});const v=parsed.data;
+ if(v.kind==='approve-plan'||v.kind==='attest'){const secret=(env as unknown as Record<string,unknown>).STAFFING_DISPATCH_SECRET;const supplied=req.headers.get('X-Staffing-Dispatcher-Key');if(typeof secret!=='string'||secret.length<32||!supplied)return Response.json({error:'Dispatcher authorization required.'},{status:403,headers});const a=await hashCapability(secret),b=await hashCapability(supplied);let diff=a.length^b.length;for(let i=0;i<Math.max(a.length,b.length);i++)diff|=(a.charCodeAt(i)||0)^(b.charCodeAt(i)||0);if(diff!==0)return Response.json({error:'Dispatcher authorization required.'},{status:403,headers});}
+ try{const db=getDb();const [task]=await db.select().from(tasks).where(eq(tasks.id,v.taskId)).limit(1);if(!task)return Response.json({error:'Task not found.'},{status:404,headers});let data:unknown=v;
+ if(v.kind==='plan')data={...v,taskBrief:task.description,taskRevision:task.updatedAt,authority:'unverified'};
+ if(v.kind==='approve-plan'){
+  const [plan]=await db.select().from(workLogQuality).where(and(eq(workLogQuality.id,v.planId),eq(workLogQuality.taskId,v.taskId),eq(workLogQuality.kind,'plan'))).limit(1);
+  if(!plan||task.startedAt||!['Backlog','Ready'].includes(task.status))return Response.json({error:'Only a plan approved before task start can be prospective.'},{status:400,headers});
+  data={...v,authority:'dispatcher-attested',prospective:true};
+ }
+ if(v.kind==='attest'){
+  const [packets,approvals,assessments]=await db.batch([db.select().from(workLogQuality).where(and(eq(workLogQuality.id,v.packetId),eq(workLogQuality.taskId,v.taskId),eq(workLogQuality.kind,'packet'))).limit(1),db.select().from(workLogQuality).where(and(eq(workLogQuality.id,v.approvalId),eq(workLogQuality.taskId,v.taskId),eq(workLogQuality.kind,'approve-plan'))).limit(1),db.select().from(workLogQuality).where(and(eq(workLogQuality.taskId,v.taskId),eq(workLogQuality.kind,'assessment'))).limit(501)]);
+  const packet=packets[0]&&JSON.parse(packets[0].data),approval=approvals[0]&&JSON.parse(approvals[0].data),chosen=assessments.filter(r=>v.assessmentIds.includes(r.id));
+  if(assessments.length>500||!packet||!approval||!approval.prospective||approval.planId!==packet.planId||chosen.length!==2||chosen.some(r=>JSON.parse(r.data).packetId!==v.packetId)||!packet.collectionComplete)return Response.json({error:'A complete packet, prospective approved plan and two assessments of that packet are required.'},{status:400,headers});
+  if(packet.task.status!=='Done'||!packet.task.startedAt||approvals[0].createdAt>packet.task.startedAt||packet.plan.data.taskBrief!==packet.task.description)return Response.json({error:'The frozen task must be Done and match a plan approved before its recorded start.'},{status:400,headers});
+  let config:any;try{config=JSON.parse(packet.task.configSnapshot||'{}')}catch{}if(!config?.workerId)return Response.json({error:'Stable worker configuration and attribution evidence are required.'},{status:400,headers});
+  const selected=JSON.parse(chosen.find(r=>r.id===v.selectedAssessmentId)!.data);const metrics=draftSummary(packet.plan.data,selected);const independentMetrics=chosen.map(r=>draftSummary(packet.plan.data,JSON.parse(r.data)));const reviews=chosen.map(r=>JSON.parse(r.data));const gates=[v.gate,...reviews.map(r=>r.gate)];const factual=reviews.map(r=>r.dimensions.factualSupport.score);const blocked=gates.includes('failed')||factual.includes(0)?'Not eligible':gates.some(g=>g!=='clear')||factual.includes(1)?'On hold':independentMetrics.some(m=>m.coverage==null||m.quality==null)?'Unknown':'Eligible';
+  const combined=blocked==='Eligible'?0.7*metrics.quality!+0.3*metrics.coverage!:null;
+  data={...v,authority:'dispatcher-attested',workerId:config.workerId,packetBoundary:packet.boundary,metrics:{...metrics,combined,eligible:blocked==='Eligible'},status:blocked,formula:'0.70 quality + 0.30 coverage (provisional v1)',verified:true};
+ }
+ if(v.kind==='packet'){
+  const [plans,logs,packetTasks]=await db.batch([db.select().from(workLogQuality).where(and(eq(workLogQuality.id,v.planId),eq(workLogQuality.taskId,v.taskId),eq(workLogQuality.kind,'plan'))).limit(1),db.select().from(taskWorkLog).where(eq(taskWorkLog.taskId,v.taskId)).orderBy(asc(taskWorkLog.id)).limit(10001),db.select().from(tasks).where(eq(tasks.id,v.taskId)).limit(1)]);
+  const task=packetTasks[0];if(!task)return Response.json({error:'Task not found.'},{status:404,headers});
+  if(!plans.length)return Response.json({error:'Plan not found for this task.'},{status:400,headers});if(logs.length>10000)return Response.json({error:'Log exceeds the 10,000-entry packet limit; no partial packet created.'},{status:400,headers});
+  if(new TextEncoder().encode(JSON.stringify(logs)).length>900000)return Response.json({error:'Log exceeds the 900 KB packet limit; no partial packet created.'},{status:400,headers});
+  const entries=await Promise.all(logs.map(async e=>{const bytes=new TextEncoder().encode(JSON.stringify(e));const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(n=>n.toString(16).padStart(2,'0')).join('');return {...e,sha256:hash}}));
+  data={...v,plan:unpack(plans[0]),task:{id:task.id,title:task.title,description:task.description,project:task.project,assignee:task.assignee,status:task.status,startedAt:task.startedAt,configSnapshot:task.configSnapshot},entries,boundary:entries.at(-1)?.id??0,collectionComplete:true,attribution:'unverified',authority:authorityNotice};
+ }
+ if(v.kind==='assessment'||v.kind==='adjudication'){
+  const [packet]=await db.select().from(workLogQuality).where(and(eq(workLogQuality.id,v.packetId),eq(workLogQuality.taskId,v.taskId),eq(workLogQuality.kind,'packet'))).limit(1);if(!packet)return Response.json({error:'Packet not found for this task.'},{status:400,headers});const p=JSON.parse(packet.data);const entryIds=new Set<number>(p.entries.map((e:{id:number})=>e.id));
+  if(v.kind==='assessment'){const slots=new Set<string>(p.plan.data.slots.filter((s:{applicability:string})=>s.applicability==='applicable').map((s:{id:string})=>s.id));const refs=[...v.units.flatMap(u=>u.entryIds),...Object.values(v.dimensions).flatMap(d=>d.entryIds)];if(refs.some(id=>!entryIds.has(id))||v.units.some(u=>!slots.has(u.slotId)))return Response.json({error:'Every entry and applicable slot must belong to the frozen packet.'},{status:400,headers});}
+  else {const records=await db.select().from(workLogQuality).where(and(eq(workLogQuality.taskId,v.taskId),eq(workLogQuality.kind,'assessment')));const chosen=records.filter(r=>v.assessmentIds.includes(r.id));if(chosen.length!==2||chosen.some(r=>JSON.parse(r.data).packetId!==v.packetId))return Response.json({error:'Both assessments must belong to this packet.'},{status:400,headers});}
+  data={...v,...(v.kind==='assessment'?{draftMetrics:draftSummary(p.plan.data,v)}:{}),authority:'unverified',verified:false,combined:null,notice:authorityNotice};
+ }
+ const id=crypto.randomUUID(),createdAt=new Date().toISOString();await db.insert(workLogQuality).values({id,taskId:v.taskId,kind:v.kind,data:JSON.stringify(data),createdAt});return Response.json({id,kind:v.kind,createdAt,authorityNotice},{status:201,headers});
+ }catch{return Response.json({error:'Could not save quality draft; apply migration 0010.'},{status:500,headers})}}

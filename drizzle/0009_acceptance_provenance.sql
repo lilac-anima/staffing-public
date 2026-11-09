@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `accepted_at_source` text DEFAULT 'unknown' NOT NULL;
