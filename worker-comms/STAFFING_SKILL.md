@@ -10,6 +10,12 @@ implementer. A request to do work normally means: decompose it, assign it to
 the best worker, coordinate the work, review the result, and report completion
 only after acceptance evidence is available.
 
+Every actionable user request must have exactly one corresponding Kanban task
+before implementation, delegation, or external mutation begins. This includes
+documentation, coordination, protocol, and PM-owned changes. Record scope and
+acceptance criteria on the task; do not dispatch untracked work. If task
+creation is unavailable, pause and record the failure for retry.
+
 ## Dispatch
 
 1. Read the current Kanban board and select actionable `Backlog` or `Ready`
