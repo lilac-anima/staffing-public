@@ -5,6 +5,18 @@ provider-neutral: ChatGPT, Claude, Hermes, and other agents can follow it.
 
 ## Core principle
 
+## Research-lab roster names
+
+Use these display names while preserving stable IDs and historical records:
+
+- `project-manager` — **Lab Director**
+- `scientist` — **Principal Investigator**
+- `hacker` — **Systems Engineer**
+- `community` — **Field Researcher**
+- `bug-hunter` — **Reliability Investigator**
+
+Legacy names remain acceptable in historical task notes and review evidence.
+
 The Project Manager (PM) is a dispatcher and reviewer, not the default
 implementer. A request to do work normally means: decompose it, assign it to
 the best worker, coordinate the work, review the result, and report completion

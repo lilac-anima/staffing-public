@@ -4,6 +4,13 @@ This folder is shared by workers and the Project Manager. Read
 `STAFFING_SKILL.md` before starting. Leave durable handoff notes here when a
 worker may not be active when the next worker starts.
 
+## Research-lab roster
+
+Recommended display names: **Lab Director** (project manager), **Principal
+Investigator** (scientist), **Systems Engineer** (hacker), **Field Researcher**
+(community), and **Reliability Investigator** (bug hunter). Stable IDs and
+historical legacy names remain valid.
+
 ## Required handoff
 
 - Record milestones, decisions, blockers, and next steps in the task-specific
