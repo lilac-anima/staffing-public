@@ -56,6 +56,14 @@ Never place credentials in arguments, source, files, logs, or child
 environments. Do not claim an external deployment, access check, or worker
 measurement without evidence.
 
+## Bug Hunter
+
+Bug Hunter is a specialized worker for reproducible bug remediation and
+periodic codebase review. The Scientist authors its character sheet and review
+brief. It can be dispatched on demand, and an hourly idle-only review may run
+only when Bug Hunter has no `In Progress` task. Findings become Kanban tasks
+with severity, evidence, reproduction or reasoning, tests, and next steps.
+
 ## Review
 
 New worker experiments use a rolling paired-variant protocol: the Scientist
