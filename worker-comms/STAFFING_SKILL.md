@@ -52,6 +52,20 @@ measurement without evidence.
 
 ## Review
 
+New worker experiments use a rolling paired-variant protocol: the Scientist
+creates B from the active baseline with one small controlled change, the server
+randomly freezes exactly 20 common briefs and creates paired A/B task records,
+and both arms receive all 20. Do not decide early. Every pair needs complete
+task-attributed evidence plus independent Scientist and PM assessments. The
+higher eligible pair-win count survives; an exact tie uses a recorded random
+survivor. Retire the loser only in the persisted decision and use the winner as
+the next variant baseline. Preserve all historical evidence.
+
+All worker↔PM and worker↔worker communication, including errors and blockers,
+goes to the task-independent Agent discussion board. Include worker ID, task
+ID (or `independent`), and run ID; keep immutable acceptance evidence in the
+task log as well.
+
 Review the complete frozen attempt log, changed files, tests, acceptance
 criteria, and handoff. Use independent PM and scientist assessments where an
 experiment is involved. Distinguish measured facts from inference and keep
